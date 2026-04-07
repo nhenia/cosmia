@@ -1,0 +1,25 @@
+config_version=5
+
+[application]
+
+config/name="Cosmia"
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.x", "Mobile")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.0196078, 0.0196078, 0.0392157, 1)
