@@ -1,0 +1,18 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Shader" path="res://shaders/Turbulence.gdshader" id="1_shader"]
+[ext_resource type="Script" path="res://scripts/Star.gd" id="2_script"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
+shader = ext_resource("1_shader")
+shader_parameter/turbulence = 0.0
+shader_parameter/base_color = Color(1, 1, 1, 1)
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_1"]
+size = Vector2(200, 200)
+
+[node name="Star" type="Sprite2D"]
+material = SubResource("ShaderMaterial_1")
+position = Vector2(360, 640)
+texture = SubResource("PlaceholderTexture2D_1")
+script = ext_resource("2_script")
