@@ -12,6 +12,9 @@ var drag_start_pos = Vector2.ZERO
 var long_press_timer = 0.0
 var ghost_ui_spawned = false
 
+# Persistence
+const SAVE_PATH = "user://star_data.cfg"
+
 # Star properties
 var magnitude = 1.0 # Scales size and depth
 var turbulence = 0.0 # Shader parameter
@@ -21,14 +24,22 @@ var velocity = Vector2.ZERO
 var resting_y = 0.0
 var is_slingshotting = false
 
+# Haptics
+var last_haptic_intensity = 0.0
+const HAPTIC_THRESHOLD = 0.15 # Minimum change to trigger new haptic
+
 @onready var main_node = get_tree().root.get_child(0)
 
 func _ready():
-	resting_y = global_position.y
 	# Ensure we have a material for the shader
 	if not material:
-		material = ShaderMaterial.new()
-		material.shader = load("res://shaders/Turbulence.gdshader")
+		var mat = ShaderMaterial.new()
+		mat.shader = load("res://shaders/Turbulence.gdshader")
+		material = mat
+
+	load_star_data()
+	resting_y = global_position.y
+	_update_visuals()
 
 func _process(delta):
 	if not is_dragging and is_slingshotting:
@@ -39,18 +50,30 @@ func _process(delta):
 		if long_press_timer >= LONG_PRESS_TIME and not ghost_ui_spawned:
 			_spawn_ghost_ui()
 
-func _input(event):
+func _unhandled_input(event):
+	# Debug reset state
+	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_R:
+			reset_star_state()
+
 	if event is InputEventScreenTouch:
 		if event.pressed:
+			# In Godot 4, button clicks might not set focus immediately on touch
+			# Check if any UI element at the touch position is handling the input
+			# Or if something already handled it (unhandled_input is better but _input is current)
+
 			if get_rect().has_point(to_local(event.position)):
 				_start_drag(event.position)
+				get_viewport().set_input_as_handled()
 		else:
 			if is_dragging:
 				_end_drag(event.position)
+				get_viewport().set_input_as_handled()
 
 	elif event is InputEventScreenDrag:
 		if is_dragging:
 			_update_drag(event.position)
+			get_viewport().set_input_as_handled()
 
 func _start_drag(pos):
 	is_dragging = true
@@ -79,8 +102,14 @@ func _update_drag(pos):
 	# Magnitude is always updated based on the total vertical displacement from rest
 	# Moving up increases magnitude, moving down decreases it slightly from the resting scale
 	magnitude = clamp(1.0 - (diff.y / 500.0), 0.5, 2.0)
+	_update_visuals()
+
+func _update_visuals():
 	scale = Vector2(magnitude, magnitude)
 	z_index = int(magnitude * 10)
+	material.set_shader_parameter("turbulence", turbulence)
+	# Update resting_y based on the new magnitude
+	resting_y = get_viewport_rect().size.y * 0.5 - (magnitude - 1.0) * 200.0
 
 func _end_drag(pos):
 	is_dragging = false
@@ -89,9 +118,10 @@ func _end_drag(pos):
 	if diff.y > SLINGSHOT_THRESHOLD:
 		_fire_slingshot(diff.y)
 	else:
-		# Update resting_y based on the new magnitude
-		resting_y = get_viewport_rect().size.y * 0.5 - (magnitude - 1.0) * 200.0
+		_update_visuals()
 		is_slingshotting = true
+
+	save_star_data()
 
 func _fire_slingshot(tension):
 	is_slingshotting = true
@@ -110,31 +140,43 @@ func _handle_physics(delta):
 		is_slingshotting = false
 
 func _trigger_haptic(intensity):
-	if intensity > 0.1:
-		# Godot's mobile haptic support (simplified)
-		Input.vibrate_handheld(int(intensity * 100))
+	# Throttle: Only vibrate if there is a significant change or if crossing a major threshold
+	if abs(intensity - last_haptic_intensity) > HAPTIC_THRESHOLD or (intensity > 0.8 and last_haptic_intensity <= 0.8):
+		if intensity > 0.1:
+			# Godot's mobile haptic support
+			Input.vibrate_handheld(int(intensity * 50)) # Slightly gentler max
+			last_haptic_intensity = intensity
 
 func _spawn_ghost_ui():
 	ghost_ui_spawned = true
-	var overlay = Node2D.new()
+	var overlay = Control.new() # Use Control to better handle input
 	overlay.name = "GhostUI"
+	# Make overlay cover the star's area to catch input if needed,
+	# but buttons are what we care about
 	add_child(overlay)
 
 	for i in range(3):
 		var angle = i * (TAU / 3.0)
-		var button = ColorRect.new()
-		button.custom_minimum_size = Vector2(40, 40)
-		button.position = Vector2(cos(angle), sin(angle)) * 80.0 - Vector2(20, 20)
-		button.color = Color(1, 1, 1, 0.5)
+		var button = Button.new() # Use Button instead of ColorRect for easier input handling
+		button.custom_minimum_size = Vector2(60, 60)
+		button.position = Vector2(cos(angle), sin(angle)) * 100.0 - Vector2(30, 30)
+
+		# Styling the button to keep it "metaphor-first"
+		var style = StyleBoxFlat.new()
+		style.bg_color = Color(1, 1, 1, 0.3)
+		style.set_corner_radius_all(30)
+		button.add_theme_stylebox_override("normal", style)
+		button.add_theme_stylebox_override("hover", style)
+		button.add_theme_stylebox_override("pressed", style)
+
 		overlay.add_child(button)
 
-		# Add a simple touch detection for buttons
-		button.gui_input.connect(_on_ghost_button_pressed.bind(overlay))
+		# Use the pressed signal which is standard for Buttons
+		button.pressed.connect(_on_ghost_button_pressed.bind(overlay))
 
-func _on_ghost_button_pressed(event, overlay):
-	if event is InputEventScreenTouch and event.pressed:
-		_apply_ozone_effect()
-		overlay.queue_free()
+func _on_ghost_button_pressed(overlay):
+	_apply_ozone_effect()
+	overlay.queue_free()
 
 func _apply_ozone_effect():
 	var canvas_layer = CanvasLayer.new()
@@ -153,3 +195,27 @@ func _apply_ozone_effect():
 	# Auto-remove after some time for demo purposes
 	await get_tree().create_timer(2.0).timeout
 	canvas_layer.queue_free()
+
+func save_star_data():
+	var config = ConfigFile.new()
+	config.set_value("star", "magnitude", magnitude)
+	config.set_value("star", "turbulence", turbulence)
+	config.save(SAVE_PATH)
+
+func load_star_data():
+	var config = ConfigFile.new()
+	var err = config.load(SAVE_PATH)
+	if err == OK:
+		magnitude = config.get_value("star", "magnitude", 1.0)
+		turbulence = config.get_value("star", "turbulence", 0.0)
+
+func reset_star_state():
+	magnitude = 1.0
+	turbulence = 0.0
+	velocity = Vector2.ZERO
+	is_slingshotting = false
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.remove_absolute(SAVE_PATH)
+	_update_visuals()
+	global_position.y = get_viewport_rect().size.y * 0.5
+	print("Star state reset.")
